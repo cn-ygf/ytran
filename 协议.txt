@@ -1,0 +1,44 @@
+监听ssl server
+有客户端连到ssl server
+开启sock5 server
+
+
+
+肉鸡连接到ssl-server
+
+ssl-server发送一个 代理指令 包含代理id
+
+肉鸡连接需要代理的数据成功
+
+肉鸡返回所对应的代理ID加数据送回服务器
+
+服务器根据代理ID和sock5客户端交换数据 
+
+
+数据类型
+0x00			心跳包
+0x01			请求包
+0x02			数据包
+
+心跳包协议
+0x09			头
+0x00			数据类型
+0x09			尾
+
+请求协议
+0x09			头
+0x01			数据类型
+0x01			代理ID
+0x01 or 0x02	tcp/udp
+0x0d			地址长度
+www.baidu.com	地址
+0x00,0x80		端口 2 byte
+0x08			尾
+
+数据交换协议
+0x09			头
+0x02			数据类型
+0x01			代理ID
+0xffff			数据长度 2byte
+0xxxxx			数据
+0x08			尾

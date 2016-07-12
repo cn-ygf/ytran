@@ -19,6 +19,10 @@ type sock5_client struct {
 //代理服务器集合
 var proxy_list []net.Conn
 
+//socket5客户端队列
+//var sock5_list []*sock5_client
+var sock5_list map[int]*sock5_client = make(map[int]*sock5_client)
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -160,6 +164,14 @@ func handleSock5(conn net.Conn) {
 		conn.Write([]byte{0x05, rep, 0x00, 0x01})
 		conn.Close()
 	}
+
+	//组包
+	proxy_id := len(proxy_list) + 1
+	sock5client := new(sock5_client)
+	sock5client.id = proxy_id
+	sock5client.conn = conn
+	sock5_list[proxy_id] = sock5client
+
 	//给proxy发送请求
 
 	//可用应答
