@@ -4,15 +4,18 @@ import (
 	"net"
 	"time"
 	//	"crypto/rand"
+	"bytes"
 	"crypto/tls"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"strconv"
+
 	//	"time"
 )
 
 type sock5_client struct {
-	id   int
+	id   int32
 	conn net.Conn
 }
 
@@ -21,7 +24,7 @@ var proxy_list []net.Conn
 
 //socket5客户端队列
 //var sock5_list []*sock5_client
-var sock5_list map[int]*sock5_client = make(map[int]*sock5_client)
+var sock5_list map[int32]*sock5_client = make(map[int32]*sock5_client)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -150,8 +153,8 @@ func handleSock5(conn net.Conn) {
 		return
 	}
 	//获取端口
+	var portbuff [2]byte
 	if rep == 0x00 {
-		var portbuff [2]byte
 		length, err = conn.Read(portbuff[0:2])
 		if err != nil || length != 2 {
 			conn.Close()
@@ -166,13 +169,31 @@ func handleSock5(conn net.Conn) {
 	}
 
 	//组包
-	proxy_id := len(proxy_list) + 1
+	var proxy_id int32 = int32(len(proxy_list) + 1)
 	sock5client := new(sock5_client)
 	sock5client.id = proxy_id
 	sock5client.conn = conn
 	sock5_list[proxy_id] = sock5client
 
 	//给proxy发送请求
+	b_buf := bytes.NewBuffer([]byte{})
+	b_buf.WriteByte(0x09)
+	b_buf.WriteByte(0x01)
+	binary.Write(b_buf, binary.BigEndian, &proxy_id)
+	b_buf.WriteByte(0x01)
+	b_buf.WriteByte(byte(len(remoteaddress)))
+	b_buf.WriteString(remoteaddress)
+	b_buf.WriteByte(portbuff[0])
+	b_buf.WriteByte(portbuff[1])
+	b_buf.WriteByte(0x08)
+
+	length, err = proxy_list[0].Write(b_buf.Bytes())
+	if err != nil || length != len(b_buf.Bytes()) {
+		proxy_list[0].Close()
+		conn.Close()
+		fmt.Printf("[+]ssl write faild!\n")
+		return
+	}
 
 	//可用应答
 	rep = 0x00
@@ -280,19 +301,19 @@ func connect(ip string, port int) {
 	config := tls.Config{InsecureSkipVerify: true, ServerName: ip}
 	conn, err := tls.Dial("tcp", server, &config)
 	if err != nil {
-		fmt.Printf("[-]connect to %s faild!err:%s\n", server, err)
+		fmt.Printf("[-]connect to %s faild!\n", server)
 		return
 	}
 	fmt.Printf("[+]connect to %s done!\n", server)
-	len, err := conn.Write([]byte{0x09, 0x00, 0x08})
-	if err != nil || len != 3 {
+	length, err := conn.Write([]byte{0x09, 0x00, 0x08})
+	if err != nil || length != 3 {
 		conn.Close()
 		fmt.Printf("[-]write data faild!\n")
 		return
 	}
 	var hbuff [3]byte
-	len, err = conn.Read(hbuff[0:3])
-	if err != nil || len != 3 {
+	length, err = conn.Read(hbuff[0:3])
+	if err != nil || length != 3 {
 		conn.Close()
 		fmt.Printf("[-]read data faild!\n")
 		return
@@ -307,8 +328,8 @@ func connect(ip string, port int) {
 	for {
 		var headbuff [3]byte
 		var tailbuff [1]byte
-		len, err = conn.Read(headbuff[0:2])
-		if err != nil || len != 2 {
+		length, err = conn.Read(headbuff[0:2])
+		if err != nil || length != 2 {
 			conn.Close()
 			fmt.Printf("[+]read data error!\n")
 			break
@@ -320,8 +341,8 @@ func connect(ip string, port int) {
 		}
 		//包类型
 		if headbuff[1] == 0x00 { //心跳包
-			len, err = conn.Read(tailbuff[0:1])
-			if err != nil || len != 1 {
+			length, err = conn.Read(tailbuff[0:1])
+			if err != nil || length != 1 {
 				conn.Close()
 				fmt.Printf("[+]read data error!\n")
 				break
@@ -332,6 +353,50 @@ func connect(ip string, port int) {
 				continue
 			}
 		} else if headbuff[1] == 0x01 { //请求包
+			fmt.Printf("[debug]收到请求包\n")
+			var proxy_id int32
+			var proxy_id_buff []byte
+			//读取proxy_)id
+			length, err = conn.Read(proxy_id_buff[0:4])
+			if err != nil || length != 4 {
+				conn.Close()
+				fmt.Printf("[+]read data error!\n")
+				break
+			}
+			b_buf_proxy_id := bytes.NewBuffer(proxy_id_buff)
+			binary.Read(b_buf_proxy_id, binary.BigEndian, &proxy_id)
+			//读取协议类型和地址长度
+			var proto_len []byte
+			length, err = conn.Read(proto_len[0:2])
+			if err != nil || length != 2 {
+				conn.Close()
+				fmt.Printf("[+]read data error!\n")
+				break
+			}
+
+			//读取地址
+			var address_len int = int(proto_len[1])
+			var address_buff []byte
+			length, err = conn.Read(address_buff[0:address_len])
+			if err != nil || length != address_len {
+				conn.Close()
+				fmt.Printf("[+]read data error!\n")
+				break
+			}
+
+			//读取端口
+			var port_buff []byte
+			length, err = conn.Read(port_buff[0:2])
+			if err != nil || length != 2 {
+				conn.Close()
+				fmt.Printf("[+]read data error!\n")
+				break
+			}
+			var port int16
+			b_buf_port := bytes.NewBuffer(port_buff)
+			binary.Write(b_buf_port, binary.BigEndian, &port)
+
+			fmt.Sprintf("[debug]address:%s port:%d \n", string(address_buff), port)
 
 		} else if headbuff[1] == 0x02 { //数据包
 

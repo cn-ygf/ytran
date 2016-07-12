@@ -28,7 +28,7 @@ ssl-server发送一个 代理指令 包含代理id
 请求协议
 0x09			头
 0x01			数据类型
-0x01			代理ID
+0x00000000		代理ID 4 byte
 0x01 or 0x02	tcp/udp
 0x0d			地址长度
 www.baidu.com	地址
