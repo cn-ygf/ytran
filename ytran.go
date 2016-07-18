@@ -1,20 +1,17 @@
 package main
 
 import (
-	"net"
-	"runtime"
-	"strings"
-	"time"
-	//	"crypto/rand"
 	"bytes"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+	"net"
 	"os"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync"
-
-	//	"time"
+	"time"
 )
 
 type proxy_data struct {
@@ -161,7 +158,7 @@ func handleSock5(conn net.Conn) {
 			fmt.Print("[-]sock5 read domainbuff faild!\n")
 			return
 		}
-		fmt.Println("[+] domainname:", string(domainbuff))
+		fmt.Println("[+]domainname:", string(domainbuff))
 		remoteaddress = string(domainbuff)
 	} else {
 		//不支持的类型
@@ -348,7 +345,7 @@ func handleRecv(conn net.Conn) {
 					proxydata.conn_sock5.Close()
 					fmt.Printf("[-]remote connect faild!\n")
 				} else if request_buff[4] == 0x01 { //远程连接成功
-					fmt.Printf("[-]remote connect done!\n")
+					fmt.Printf("[+]remote connect done!\n")
 					//读取ip地址 4byte
 					var ip_buff []byte = make([]byte, 4)
 					length, err = conn.Read(ip_buff[0:4])
@@ -365,7 +362,7 @@ func handleRecv(conn net.Conn) {
 						fmt.Printf("[-]ssl read port_buff faild!\n")
 						break
 					}
-					fmt.Printf("[debug]%d.%d.%d.%d  %d %d\n", ip_buff[0], ip_buff[1], ip_buff[2], ip_buff[3], port_buff[0], port_buff[1])
+					//fmt.Printf("[debug]%d.%d.%d.%d  %d %d\n", ip_buff[0], ip_buff[1], ip_buff[2], ip_buff[3], port_buff[0], port_buff[1])
 					//向socket5客户端发送可以交换数据的包
 					b_buf_send := bytes.NewBuffer([]byte{})
 					b_buf_send.WriteByte(0x05)
@@ -386,7 +383,7 @@ func handleRecv(conn net.Conn) {
 			}
 		} else if headbuff[1] == 0x02 { //数据交互协议
 			//把收到的数据发送给socket5客户端
-			fmt.Printf("[debug]ssl-server收到数据交互\n")
+			//fmt.Printf("[debug]ssl-server收到数据交互\n")
 			//读取proxy_id
 			var proxy_id int32
 			var proxy_id_buff []byte = make([]byte, 4)
@@ -399,7 +396,7 @@ func handleRecv(conn net.Conn) {
 			}
 			b_buf_proxy_id := bytes.NewBuffer(proxy_id_buff)
 			binary.Read(b_buf_proxy_id, binary.BigEndian, &proxy_id)
-			fmt.Printf("[debug]proxy_id:%d\n", proxy_id)
+			//fmt.Printf("[debug]proxy_id:%d\n", proxy_id)
 			//读取数据长度 2 byte
 			var data_len int16
 			var data_len_buff []byte = make([]byte, 2)
@@ -411,7 +408,7 @@ func handleRecv(conn net.Conn) {
 			}
 			b_buf_data_len := bytes.NewBuffer(data_len_buff)
 			binary.Read(b_buf_data_len, binary.BigEndian, &data_len)
-			fmt.Printf("[debug]data_len:%d\n", data_len)
+			//fmt.Printf("[debug]data_len:%d\n", data_len)
 			//读取数据
 			data_buff, errr := completeread(conn, int(data_len))
 			if errr == -1 {
@@ -431,7 +428,7 @@ func handleRecv(conn net.Conn) {
 				}
 			}
 		} else if headbuff[1] == 0x03 { //关闭socket5客户端协议
-			fmt.Printf("[debug]收到关闭连接请求")
+			//fmt.Printf("[debug]收到关闭连接请求")
 			var proxy_id int32
 			var proxy_id_buff []byte = make([]byte, 4)
 			//读取proxy_id 4 byte
@@ -458,7 +455,7 @@ func handleRecv(conn net.Conn) {
 			fmt.Printf("[-]ssl read faild!\n")
 			break
 		}
-		fmt.Printf("[debug] tailbuff:%d\n", tailbuff[0])
+		//fmt.Printf("[debug] tailbuff:%d\n", tailbuff[0])
 		//校验包尾
 		if tailbuff[0] != 0x08 {
 			conn.Close()
@@ -541,8 +538,8 @@ func handleRemote(remote_id int32) {
 				remotedata.remote_conn.Close()
 				break
 			}
-			fmt.Printf("[debug]发送了%d数据\n", b_buf_send.Len())
-			fmt.Printf("[debug]数据长度%d\n", length)
+			//fmt.Printf("[debug]发送了%d数据\n", b_buf_send.Len())
+			//fmt.Printf("[debug]数据长度%d\n", length)
 			//fmt.Println(send_buff)
 		}
 	}
@@ -613,7 +610,7 @@ func connect(ip string, port int) {
 				continue
 			}
 		} else if headbuff[1] == 0x01 { //请求包
-			fmt.Printf("[debug]收到请求包\n")
+			//fmt.Printf("[debug]收到请求包\n")
 			var proxy_id int32
 			var proxy_id_buff []byte = make([]byte, 4)
 			//读取proxy_id
@@ -653,7 +650,7 @@ func connect(ip string, port int) {
 			var port int16
 			b_buf_port := bytes.NewBuffer(port_buff)
 			binary.Read(b_buf_port, binary.BigEndian, &port)
-			fmt.Printf("[debug]address:%s port:%d \n", string(address_buff), port)
+			//fmt.Printf("[debug]address:%s port:%d \n", string(address_buff), port)
 			//读取校验包尾
 			var tail_buff []byte = make([]byte, 1)
 			length, err = conn.Read(tail_buff[0:1])
@@ -667,6 +664,8 @@ func connect(ip string, port int) {
 				fmt.Printf("[-]tail_buff error!\n")
 				break
 			}
+
+			//这里需要改成异步连接
 
 			//连接需要代理的服务器
 			remote_conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", string(address_buff), port), time.Second*10)
@@ -734,7 +733,7 @@ func connect(ip string, port int) {
 			}
 			b_buf_proxy_id := bytes.NewBuffer(proxy_id_buff)
 			binary.Read(b_buf_proxy_id, binary.BigEndian, &proxy_id)
-			fmt.Printf("[debug]proxy_id:%d\n", proxy_id)
+			//fmt.Printf("[debug]proxy_id:%d\n", proxy_id)
 			//读取数据长度 2 byte
 			var data_len int16
 			var data_len_buff []byte = make([]byte, 2)
@@ -746,7 +745,7 @@ func connect(ip string, port int) {
 			}
 			b_buf_data_len := bytes.NewBuffer(data_len_buff)
 			binary.Read(b_buf_data_len, binary.BigEndian, &data_len)
-			fmt.Printf("[debug]data_len:%d\n", data_len)
+			//fmt.Printf("[debug]data_len:%d\n", data_len)
 			//读取数据
 			data_buff, errr := completeread(conn, int(data_len))
 			if errr == -1 {
@@ -768,6 +767,7 @@ func connect(ip string, port int) {
 				break
 			}
 			//把数据发送给远程数据
+			//需要异步发送
 			remotedata, ok := remote_data_list[proxy_id]
 			if ok {
 				length = completewrite(remotedata.remote_conn, data_buff)
@@ -782,7 +782,7 @@ func connect(ip string, port int) {
 			}
 
 		} else if headbuff[1] == 0x03 { //关闭远程连接包
-			fmt.Printf("[debug]收到关闭连接请求\n")
+			//fmt.Printf("[debug]收到关闭连接请求\n")
 			var proxy_id int32
 			var proxy_id_buff []byte = make([]byte, 4)
 			//读取proxy_id 4 byte
@@ -826,7 +826,7 @@ func completeread(conn net.Conn, size int) ([]byte, int) {
 	for {
 		length, err := conn.Read(buff[count:size])
 		if err != nil {
-			fmt.Println("[debug]read:", err)
+			//fmt.Println("[debug]read:", err)
 			return nil, -1
 		}
 		count = count + length
@@ -875,7 +875,9 @@ func transmitData(sockfd1 net.Conn, sockfd2 net.Conn) {
 
 //使用说明
 func usage() {
-	fmt.Print("Usage:\n")
+	fmt.Printf("======================== HUC Packet Transmit Tool V1.00 =======================\n")
+	fmt.Printf("=========== Code by YGF , Welcome to http://www.cnhonker.com ==========\n")
+	fmt.Print("[Usage:]\n")
 	fmt.Print("\t-listen  [port1] [port2]\n")
 	fmt.Print("\t-connect [ip]    [port]\n")
 	fmt.Print("\t-help\t\n")
