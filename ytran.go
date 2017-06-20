@@ -39,6 +39,9 @@ var remote_data_list map[int32]*remote_data = make(map[int32]*remote_data)
 //proxy_data_list锁
 var mutex sync.Mutex
 
+//remote_data_list锁
+var mutex_remote sync.Mutex
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -150,7 +153,7 @@ func handleSock5(conn net.Conn) {
 		var domainlens int
 		domainlens = int(domainlen[0])
 		//创建相同长度的缓存区
-		domainbuff := make([]byte, domainlens+1)
+		domainbuff := make([]byte, domainlens)
 		//读取域名
 		length, err = conn.Read(domainbuff[0:domainlens])
 		if err != nil || length != domainlens {
@@ -205,6 +208,10 @@ func handleSock5(conn net.Conn) {
 	b_buf.WriteByte(portbuff[1])
 	b_buf.WriteByte(0x08)
 
+	if proxy_serv == nil {
+		conn.Close()
+		return
+	}
 	length, err = proxy_serv.Write(b_buf.Bytes())
 	if err != nil || length != len(b_buf.Bytes()) {
 		proxy_serv.Close()
@@ -276,6 +283,15 @@ func socket5(port int) {
 		}
 		fmt.Printf("[+]sock5 %s connection...\n", conn.RemoteAddr())
 		go handleSock5(conn)
+	}
+}
+
+func handleSend(proxydata *proxy_data, buff []byte) {
+	length := completewrite(proxydata.conn_sock5, buff)
+	if length == -1 {
+		//通知SSL客户端关闭远程连接
+		proxydata.conn_sock5.Close()
+		sendclose(proxydata.conn_proxy, proxydata.id)
 	}
 }
 
@@ -417,8 +433,10 @@ func handleRecv(conn net.Conn) {
 				break
 			}
 			//把数据发送给socket5客户端
+			//改成异步
 			proxydata, ok := proxy_data_list[proxy_id]
 			if ok {
+				//go handleSend(proxydata, data_buff)
 				length = completewrite(proxydata.conn_sock5, data_buff)
 				if length == -1 {
 					//通知SSL客户端关闭远程连接
@@ -545,6 +563,64 @@ func handleRemote(remote_id int32) {
 	}
 }
 
+func handleConnectRemote(conn net.Conn, server string, proxy_id int32, proxy_id_buff []byte, port_buff []byte) {
+	//连接需要代理的服务器
+	remote_conn, err := net.DialTimeout("tcp", server, time.Second*5)
+	if err != nil {
+		//通知SSL-server 主机不可答
+		b_send_buff := bytes.NewBuffer([]byte{})
+		b_send_buff.WriteByte(0x09)
+		b_send_buff.WriteByte(0x01)
+		b_send_buff.Write(proxy_id_buff)
+		b_send_buff.WriteByte(0x00)
+		b_send_buff.WriteByte(0x08)
+		_, err = conn.Write(b_send_buff.Bytes())
+		if err != nil {
+			conn.Close()
+			fmt.Printf("[+]write faild!\n")
+
+		}
+		return
+	}
+	//通知SSL-server连接远程地址成功
+	remote_address := remote_conn.RemoteAddr().String()
+	remote_ip := strings.Split(remote_address, ":")[0]
+	remote_ips := strings.Split(remote_ip, ".")
+	b_send_buff := bytes.NewBuffer([]byte{})
+	b_send_buff.WriteByte(0x09)
+	b_send_buff.WriteByte(0x01)
+	b_send_buff.Write(proxy_id_buff)
+	b_send_buff.WriteByte(0x01)
+	//写入ip
+	for i := 0; i < len(remote_ips); i++ {
+		ipint, _ := strconv.Atoi(remote_ips[i])
+		ipbyte := byte(ipint)
+		b_send_buff.WriteByte(ipbyte)
+	}
+	//写入端口
+	b_send_buff.Write(port_buff)
+	//包尾
+	b_send_buff.WriteByte(0x08)
+	_, err = conn.Write(b_send_buff.Bytes())
+	if err != nil {
+		conn.Close()
+		fmt.Printf("[+]write faild!\n")
+		return
+	}
+
+	//绑定数据交换
+	remotedata := new(remote_data)
+	remotedata.proxy_id = proxy_id
+	remotedata.remote_conn = remote_conn
+	remotedata.server_conn = conn
+	mutex_remote.Lock()
+	remote_data_list[proxy_id] = remotedata
+	mutex_remote.Unlock()
+
+	//读取远程数据
+	go handleRemote(proxy_id)
+}
+
 //代理客户端
 func connect(ip string, port int) {
 	server := fmt.Sprintf("%s:%d", ip, port)
@@ -639,6 +715,8 @@ func connect(ip string, port int) {
 				fmt.Printf("[+]read address error!\n")
 				break
 			}
+			//fmt.Println("debug", (address_buff))
+			//fmt.Println("debug", string(address_buff))
 			//读取端口
 			var port_buff []byte = make([]byte, 2)
 			length, err = conn.Read(port_buff[0:2])
@@ -664,11 +742,11 @@ func connect(ip string, port int) {
 				fmt.Printf("[-]tail_buff error!\n")
 				break
 			}
-
+			fmt.Println(fmt.Sprintf("%s:%d", string(address_buff), port))
 			//这里需要改成异步连接
-
+			go handleConnectRemote(conn, fmt.Sprintf("%s:%d", string(address_buff), port), proxy_id, proxy_id_buff, port_buff)
 			//连接需要代理的服务器
-			remote_conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", string(address_buff), port), time.Second*10)
+			/*remote_conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", string(address_buff), port), time.Second*10)
 			if err != nil {
 				//通知SSL-server 主机不可答
 				b_send_buff := bytes.NewBuffer([]byte{})
@@ -720,6 +798,7 @@ func connect(ip string, port int) {
 
 			//读取远程数据
 			go handleRemote(proxy_id)
+			*/
 		} else if headbuff[1] == 0x02 { //数据包
 			//收到的数据包根据proxy_id找到远程列表发送
 			var proxy_id int32
@@ -819,24 +898,6 @@ func connect(ip string, port int) {
 	}
 }
 
-//完整读取
-func completeread(conn net.Conn, size int) ([]byte, int) {
-	buff := make([]byte, size)
-	count := 0
-	for {
-		length, err := conn.Read(buff[count:size])
-		if err != nil {
-			//fmt.Println("[debug]read:", err)
-			return nil, -1
-		}
-		count = count + length
-		if count >= size {
-			break
-		}
-	}
-	return buff, 0
-}
-
 //发送关闭连接协议
 func sendclose(conn net.Conn, proxy_id int32) int {
 	//组包
@@ -848,6 +909,23 @@ func sendclose(conn net.Conn, proxy_id int32) int {
 	b_buf_send.WriteByte(0x08)
 	err := completewrite(conn, b_buf_send.Bytes())
 	return err
+}
+
+//完整读取
+func completeread(conn net.Conn, size int) ([]byte, int) {
+	buff := make([]byte, size)
+	count := 0
+	for {
+		length, err := conn.Read(buff[count:size])
+		if err != nil {
+			return nil, -1
+		}
+		count = count + length
+		if count >= size {
+			break
+		}
+	}
+	return buff, 0
 }
 
 //完整发送
@@ -865,12 +943,6 @@ func completewrite(conn net.Conn, buff []byte) int {
 		}
 	}
 	return 0
-}
-
-//数据交换
-func transmitData(sockfd1 net.Conn, sockfd2 net.Conn) {
-	fmt.Printf("[+]start transmit (%s<->%s)\n", sockfd1.RemoteAddr(), sockfd2.RemoteAddr())
-
 }
 
 //使用说明
